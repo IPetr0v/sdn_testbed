@@ -2,12 +2,14 @@ import json
 import pycurl
 
 from subprocess import call
+from paramiko import SSHClient
 
 class Controller(object):
     
-    def __init__(self, name):
+    def __init__(self, name, ip, port):
         self.name = name
-        #self.settings = settings
+        self.ip = ip
+        self.port = port
     
     def __enter__(self):
         self.start()
@@ -24,10 +26,9 @@ class Controller(object):
 
 class Runos(Controller):
     
-    def __init__(self, ip, port):
-        Controller.__init__(self, name="runos")
-        self.ip = ip
-        self.port = port
+    def __init__(self, ip, port, ssh):
+        Controller.__init__(self, name="runos", ip=ip, port=port)
+        self.ssh = ssh
         
         self.routes = []
     
@@ -35,6 +36,7 @@ class Runos(Controller):
         Controller.start(self)
     
     def stop(self):
+        call(["ssh", self.ssh, "pkill runos"]);       
         Controller.stop(self)
     
     def set_route(self, dpid1, port1, dpid2, port2, vlan):
@@ -100,4 +102,10 @@ class Runos(Controller):
                 }
             ],
             "flapping": "0"
-        }) 
+        })
+
+class Ryu(Controller):
+    
+    def __init__(self, ip, port):
+        Controller.__init__(self, name="ryu", ip=ip, port=port)
+    

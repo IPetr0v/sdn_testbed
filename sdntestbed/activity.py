@@ -101,11 +101,12 @@ class UnicastActivity(Activity):
         self.controller.clear_routes()
 
 class MulticastActivity(Activity):
-    def __init__(self, servers, hosts, group_num, save_pcap=True):
+    def __init__(self, servers, hosts, group_num, tmp_folder, save_pcap=True):
         self.hosts = list(hosts)
         self.servers = list(servers)
         self.group_num = group_num
         self.save_pcap = save_pcap
+        self.tmp_folder = tmp_folder
     
     def start(self):
         #print "Multicast activity"
@@ -114,9 +115,9 @@ class MulticastActivity(Activity):
         host_counter = 1;
         for server in self.servers:
             host_counter += 1
-            server.cmd('/sbin/vconfig add '+server.name+'-eth0 '+str(MULTICAST_VLAN))
+            '''server.cmd('/sbin/vconfig add '+server.name+'-eth0 '+str(MULTICAST_VLAN))
             server.cmd('ifconfig '+server.name+'-eth0.'+str(MULTICAST_VLAN)+' 10.0.3.'+str(host_counter)+' netmask 255.255.255.0')
-            server.cmd('route add -net 239.255.0.0/16 '+server.name+'-eth0.'+str(MULTICAST_VLAN)) 
+            server.cmd('route add -net 239.255.0.0/16 '+server.name+'-eth0.'+str(MULTICAST_VLAN))''' 
         for host in self.hosts:
             host_counter += 1
             host.cmd('/sbin/vconfig add '+host.name+'-eth0 '+str(MULTICAST_VLAN))
@@ -124,9 +125,10 @@ class MulticastActivity(Activity):
             host.cmd('route add -net 239.255.0.0/16 '+host.name+'-eth0.'+str(MULTICAST_VLAN))
         
         # Save pcap
-        call("rm ../.tmp/*.pcap > /dev/null 2>&1", shell=True)
+        call("rm "+self.tmp_folder+"/*.pcap > /dev/null 2>&1", shell=True)
         for host in self.hosts:
-            host.cmd('sudo tcpdump -i '+host.name+'-eth0 -U -w ../.tmp/'+host.name+'.pcap &') # filter can be = host 239.255.0.1 
+            host.cmd('sudo tcpdump -i '+host.name+'-eth0 -U -w '+self.tmp_folder+'/'+host.name+'.pcap &') # filter can be = host 239.255.0.1
+            #host.cmd('sudo tcpdump -i any -U -w '+self.tmp_folder+'/ololo.pcap &')
     
         # Force IGMPv2 for iperf
         for server in self.servers:
@@ -136,25 +138,36 @@ class MulticastActivity(Activity):
     
         # Start performance test
         bandwidth = 0
-        if len(self.hosts)>0: bandwidth = int((1*1000*1000)/len(self.hosts)) #bit/s
+        if len(self.hosts)>0: bandwidth = int((1*1000)/len(self.hosts)) #bit/s
         for i in range(1,self.group_num+1):
             for host in self.hosts:
-                host.cmd('iperf -s -u -B 239.255.0.'+str(i)+' -i 1 &')
-                #host.cmd('xterm -e "iperf -s -u -B 239.255.0.'+str(i)+' -i 1" &')
-        for i in range(1,self.group_num+1):
+                #host.cmd('iperf -s -u -B 239.255.0.'+str(i)+' -i 1 &')
+                #host.cmd('iperf -s -u -B 239.255.0.'+str(i)+' -i 1 &')
+                leave_message = ('python -c \"from scapy.all import Ether, Dot1Q, IP, sendp; '
+                                'from scapy.contrib.igmp import IGMP; '
+                                'from scapy.arch import get_if_hwaddr; '
+                                'sendp(Ether(src=get_if_hwaddr(\''+host.name+'-eth0.'+str(MULTICAST_VLAN)+'\'))/IP(dst=\'239.255.0.'+str(i)+'\')/IGMP(type=0x16, gaddr=\'239.255.0.'+str(i)+'\'), '
+                                'iface=\''+host.name+'-eth0.'+str(MULTICAST_VLAN)+'\')\" ')
+                host.cmd(leave_message)
+                
+        '''for i in range(1,self.group_num+1):
             for server in self.servers:
-                server.cmd('iperf -c 239.255.0.'+str(i)+' -u -b '+str(bandwidth)+' -i 1 -t 60 &')
-                #server.cmd('xterm -e "iperf -c 239.255.0.'+str(i)+' -u -b '+str(bandwidth)+' -i 1 -t 60" &')
+                #server.cmd('iperf -c 239.255.0.'+str(i)+' -u -b '+str(bandwidth)+' -i 1 -t 60 &')
+                server.cmd('iperf -c 239.255.0.'+str(i)+' -u -i 1 -t 60 &')'''
     
     def stop(self):
-        for server in self.servers:
-            server.cmd('kill $(jobs -p)')
+        for i in range(1,self.group_num+1):
+            for host in self.hosts:
+                leave_message = ('python -c \"from scapy.all import Ether, Dot1Q, IP, sendp; '
+                                'from scapy.contrib.igmp import IGMP; '
+                                'from scapy.arch import get_if_hwaddr; '
+                                'sendp(Ether(src=get_if_hwaddr(\''+host.name+'-eth0.'+str(MULTICAST_VLAN)+'\'))/IP(dst=\'239.255.0.'+str(i)+'\')/IGMP(type=0x17, gaddr=\'239.255.0.'+str(i)+'\'), ' #Dot1Q(vlan='+str(MULTICAST_VLAN)+')/
+                                'iface=\''+host.name+'-eth0.'+str(MULTICAST_VLAN)+'\')\" ')
+                #print leave_message
+                host.cmd(leave_message)
+        #time.sleep(1)
+        '''for server in self.servers:
+            server.cmd('kill $(jobs -p); pkill iperf; pkill tcpdump;')'''
         for host in self.hosts: 
-            host.cmd('kill $(jobs -p)')
-
-
-
-
-
-
-
+            host.cmd('kill $(jobs -p); pkill iperf; pkill tcpdump;')
+        
